@@ -35,7 +35,7 @@
 				<line x1="63.65" y1="63.65" x2="42.91" y2="42.91" />
 			</svg>
 			<input id='main_search_field' autocomplete="off" type="search"
-				placeholder="block, transactions, address, token or contract">
+				placeholder="block, transactions, address, token or contract" required>
 			<ul id="suggestions"></ul>
 		</label>
 	</div>
@@ -132,7 +132,7 @@
                   <h2 class="token">${topToken}</h2>
               </div>
               <div class="highlight-item">
-                  <h4 class="label">Latest transactions</h4>
+                  <h4 class="label">Total transactions</h4>
                   <h2>${totalTransactions}</h2>
               </div>
               <div class="highlight-item">
@@ -547,7 +547,7 @@
 					winningChoice,
 					committeeAddress
 				} = obj,
-					card = document.createElement("div");
+				card = document.createElement("div");
 				card.classList.add("transaction", "contract-trigger");
 				card.id = hash;
 				card.innerHTML = `    <svg class="icon" viewBox="0 0 64 64">
@@ -658,6 +658,7 @@
 		function showPage(page){
 			document.getElementById(page).classList.remove('hide')
 			document.getElementById('page_container').classList.add('hide-completely')
+			document.getElementById('main_search_field').focus();
 		}
 		function hidePage(page){
 			document.getElementById(page).classList.add('hide')
@@ -772,10 +773,11 @@
 			}
 
 			if (pageId === "block_page") {
-				let blockInfo = await getBlockInfo(field);
+				let [blockInfo, blockTransactions] = await Promise.all([getBlockInfo(field), getBlockTransactions(field)])
 				pageContainer.append(create.blockPage(blockInfo));
 				pageTitle.textContent = "block";
 				loading()
+				appendTransactions('block_transaction_container', blockTransactions)
 			}
 
 			if (pageId === "homepage") {
@@ -833,11 +835,41 @@
 		}
 
 		window.addEventListener("load", async () => {
-			document.getElementById("main_search_field").addEventListener("keydown", function (e) {
+
+			let suggestions = document.getElementById('suggestions'),
+				mainSearch = document.getElementById("main_search_field");
+
+			mainSearch.addEventListener("keydown", function (e) {
 				if (e.key === 'Enter') {
-					processNavbarSearch();
+					processNavbarSearch()
 				}
+				if(e.key === 'ArrowDown'){
+					suggestions.firstElementChild.focus()
+				}
+				if(document.activeElement.classList.contains('suggestion'))
+					mainSearch.value = document.activeElement.textContent
 			});
+			suggestions.addEventListener("keydown", function (e) {
+				if (e.key === 'ArrowDown') {
+					if (this.contains(document.activeElement) && document.activeElement.nextElementSibling)
+						document.activeElement.nextElementSibling.focus()
+				}
+				if (e.key === 'ArrowUp') {
+					if (this.contains(document.activeElement)){
+						if(document.activeElement.previousElementSibling)
+							document.activeElement.previousElementSibling.focus()
+						else
+							mainSearch.focus()
+					}
+				}
+				if (document.activeElement.classList.contains('suggestion'))
+					mainSearch.value = document.activeElement.textContent
+			});
+			suggestions.addEventListener("focus", function (e) {
+				console.log(document.activeElement)
+			});
+
+			
 			let themeToggler = document.getElementById("theme_toggle"),
 				body = document.querySelector("body");
 			if (localStorage.theme === "dark") {
@@ -941,6 +973,7 @@
 				if (e.target.closest('.suggestion')) {
 					let searchBox = document.getElementById('main_search_field');
 					searchBox.value = e.target.textContent;
+					console.log(e.target.textContent, e.target.closest('.suggestion').textContent)
 					processNavbarSearch()
 				}
 				if (e.target.closest('#all_trans_btn')) {
@@ -962,7 +995,7 @@
 			});
 		});
 
-		window.addEventListener('input', e => {
+		window.addEventListener('keyup', e => {
 			if (e.target.closest('.suggestion') && e.key === 'Enter') {
 				processNavbarSearch()
 			}
@@ -1323,7 +1356,6 @@
 			const response = await fetch(`${tokenapiUrl}/api/v1.0/getTokenTransactions?token=` + tokenName),
 				transactions = await response.json()
 			return transactions.transactions
-
 		}
 
 		async function getBlockInfo(thisBlock) {
@@ -1339,6 +1371,13 @@
 				difficulty: difficulty,
 				nonce: nonce,
 			}
+		}
+
+
+		async function getBlockTransactions(thisBlock) {
+			const response = await fetch(`${tokenapiUrl}/api/v1.0/getBlockTransactions/${thisBlock}`),
+				transactions = await response.json()
+			return transactions.transactions
 		}
 
 		async function getContractInfo(contract) {
@@ -1399,28 +1438,16 @@
 								let transferType = txList[txids[i]]["parsedFloData"]["transferType"]
 								if (transferType == "token") {
 									let receiveraddress = "";
-									for (
-										let i = 0,
-										voutlist =
-											txList[txids[i]][
-											"transactionDetails"
-											]["vout"]; i < voutlist.length; i++
-									) {
-										if (
-											voutlist[i]["scriptPubKey"]["addresses"][0] !=
-											txList[txids[i]][
-											"transactionDetails"
-											]["vin"][0]["addr"]
-										) {
-											receiveraddress =
-												voutlist[i]["scriptPubKey"]["addresses"][0];
-										}
+									for (let i = 0, voutlist = txList[txids[i]]["transactionDetails"]["vout"]; i<voutlist.length; i++) {
+										if(txList[txids[i]] != undefined){
+											if (voutlist[i]["scriptPubKey"]["addresses"][0] != txList[txids[i]]["transactionDetails"]["vin"][0]["addr"]) {
+												receiveraddress = voutlist[i]["scriptPubKey"]["addresses"][0];
+											}		
+										}								
 									}
 
 									obj = Object.assign({}, obj, {
-										sender: txList[txids[i]][
-											"transactionDetails"
-										]["vin"][0]["addr"],
+										sender: txList[txids[i]]["transactionDetails"]["vin"][0]["addr"],
 										receiver: receiveraddress,
 										amount: `${
 											txList[txids[i]][
@@ -1544,7 +1571,7 @@
 						}
 
 						obj = Object.assign({}, obj, {
-							hash: txList[txids[i]]['txid'],
+							hash: txList[txids[i]]['transactionDetails']['txid'],
 							blockHeight: txList[txids[i]]['transactionDetails']['blockheight'],
 							contractName: txList[txids[i]]['parsedFloData']['contractName'],
 							contractAddress: receiver,
@@ -1730,9 +1757,11 @@
 		}
 
 		function processNavbarSearch() {
-			userinput = document.getElementById('main_search_field');
-			if (userinput.value != '') {
-				categoriseText(userinput.value, userinput);
+			userInput = document.getElementById('main_search_field');
+			if (userInput.value != '') {
+				hidePage('search_page')
+				categoriseText(userInput.value, userInput);
+				userInput.value = ''
 			}
 		}
 
@@ -1770,12 +1799,27 @@
 				index.add(i, data[i]);
 			}
 
+			var suggestions = document.getElementById("suggestions");
+			var userinput = document.getElementById("main_search_field");
+			
+			suggestions.addEventListener("click", accept_suggestion, true);
+
 			window.suggestion = function (str) {
 				let li = document.createElement('li')
 				li.textContent = str
 				li.tabIndex = 0
 				li.classList.add('suggestion')
 				return li;
+			}
+
+			function accept_suggestion(event) {
+				var target = (event || window.event).target;
+				userinput.value = target.textContent;
+				while (suggestions.lastChild) {
+					suggestions.removeChild(suggestions.lastChild);
+				}
+
+				return false;
 			}
 
 		}
